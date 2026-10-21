@@ -358,11 +358,11 @@ def run():
 def keep_alive():
     t = Thread(target=run)
     t.start()
-app.run_polling()
+
 # Telegram botni ishga tushirishdan OLDIN ushbu funksiyani chaqiring:
 if __name__ == "__main__":
     keep_alive()  # Veb-serverni orqa fonda ishga tushiradi
-    
+    app.run_polling()
     # Shu yerda o'zingizning Telegram botni ishga tushirish kodingiz turadi:
     # (masalan: executor.start_polling, bot.infinity_polling va h.k.)
     
