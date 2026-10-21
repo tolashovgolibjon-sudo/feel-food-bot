@@ -25,7 +25,7 @@ def run_web_server():
 threading.Thread(target=run_web_server, daemon=True).start()
 # ----------------------------------------
 
-TOKEN = "8767402192:AAGBYKWVmoLb74B1BKXo-98DVqQgd3eJ9U8" # <--- СЮДА ВСТАВЬТЕ НОВЫЙ ТОКЕН
+TOKEN = "8767402192:AAGQJDclo-kPeufBD1VqXWkXzd7keV2i86c" # <--- СЮДА ВСТАВЬТЕ НОВЫЙ ТОКЕН
 
 ADMIN_ID = 1631414170 # Ваш Telegram ID
 
@@ -340,7 +340,7 @@ app.add_handler(MessageHandler(filters.VIDEO_NOTE, handle_video_note))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 
 print("Bot ishga tushdi...")
-app.run_polling()
+
 from flask import Flask
 from threading import Thread
 import os
@@ -358,7 +358,7 @@ def run():
 def keep_alive():
     t = Thread(target=run)
     t.start()
-
+app.run_polling()
 # Telegram botni ishga tushirishdan OLDIN ushbu funksiyani chaqiring:
 if __name__ == "__main__":
     keep_alive()  # Veb-serverni orqa fonda ishga tushiradi
