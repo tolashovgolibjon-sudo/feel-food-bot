@@ -7,15 +7,15 @@ import openpyxl
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
-# --- RENDER PORT TALabini qondirish uchun kichik veb-server ---
+# --- RENDER PORT TALABINI QONDIRISH UCHUN KICHIK VEB-SERVER ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"Bot is alive and running!")
-    
-    def log_message(self, format, *args):
-        pass  # Loglarni to'ldirib yubormasligi uchun
+
+    def log_message(self, self_format, *args):
+        pass # Loglarni to'ldirib yubormasligi uchun
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
@@ -24,11 +24,11 @@ def run_web_server():
 
 # Veb-serverni alohida oqimda (thread) ishga tushiramiz
 threading.Thread(target=run_web_server, daemon=True).start()
-# -------------------------------------------------------------
+# ------------------------------------------------------------
 
 TOKEN = "8962973921:AAExSSAU4OIlhze7mYnaPF4nFQalqERd3cg"
 
-ADMIN_ID = 1449598743  # <--- HAQIQIY TELEGRAM ID RAQAMINGIZNI YOZING!
+ADMIN_ID = 1449598743 # <--- HAQIQIY TELEGRAM ID RAQAMINGIZNI YOZING!
 
 DEFAULT_DAILY_SALARY = 300000
 DEFAULT_WORK_HOURS = 12
@@ -94,16 +94,16 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     records = cursor.fetchall()
 
     if records:
-        response = "👑 **Admin paneli - Davomat nazorati:**\n\n"
+        response = "📋 **Admin paneli - Davomat nazorati:**\n\n"
         for row in records:
-            response += f"👤 {row[0]} — {row[1]} [{row[2]}]\n"
+            response += f"👤 {row[0]} — {row[1]} ({row[2]})\n"
         response += (
             "\n📥 Davomat Excel: /excel"
             "\n💰 To'liq oylik (Matn): /oylik"
             "\n📊 To'liq oylik (Excel): /oylikexcel"
-            "\n⏱ 15 kunlik (Matn): /15kun"
-            "\n📋 15 kunlik (Excel): /15kunexcel"
-            "\n⚙️ Stavka: `/stavka ID SUMMA SOAT`"
+            "\n⏳ 15 kunlik (Matn): /15kun"
+            "\n📉 15 kunlik (Excel): /15kunexcel"
+            "\n⚙️ Stavka: '/stavka ID SUMMA SOAT'"
         )
         await update.message.reply_text(response, reply_markup=get_inline_keyboard())
     else:
@@ -116,7 +116,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = query.from_user
     user_id = user.id
     user_name = user.first_name
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current_time = (datetime.now() + timedelta(hours=5)).strftime("%Y-%m-%d %H:%M:%S")
 
     if query.data == "keldim":
         action = "🟢 Ishga keldim"
@@ -130,13 +130,13 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.execute("INSERT INTO attendance (user_id, user_name, action, date_time) VALUES (?, ?, ?, ?)",
                        (user_id, user_name, action, current_time))
         conn.commit()
-        await query.message.reply_text(f"🔴 {user_name}, ishdan ketganingiz qayd etildi! [{current_time}]")
+        await query.message.reply_text(f"🛑 {user_name}, ishdan ketganingiz qayd etildi! [{current_time}]")
 
 async def handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_name = user.first_name
     await update.message.reply_text(
-        f"📹 {user_name}, video xabaringiz qabul qilindi!\nIltimos, maqsadni tanlang:",
+        f"📹 {user_name}, video xabaringiz qabul qilindi!\nIltimos, maksadni tanlang:",
         reply_markup=get_inline_keyboard()
     )
 
@@ -145,7 +145,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     user = update.effective_user
     user_id = user.id
     user_name = user.first_name
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current_time = (datetime.now() + timedelta(hours=5)).strftime("%Y-%m-%d %H:%M:%S")
 
     if text in ["keldim", "ishga keldim", "keldim (gps)", "ishdaman"]:
         action = "🟢 Ishga keldim"
@@ -159,7 +159,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         cursor.execute("INSERT INTO attendance (user_id, user_name, action, date_time) VALUES (?, ?, ?, ?)",
                        (user_id, user_name, action, current_time))
         conn.commit()
-        await update.message.reply_text(f"🔴 {user_name}, ketganingiz qayd etildi! [{current_time}]")
+        await update.message.reply_text(f"🛑 {user_name}, ketganingiz qayd etildi! [{current_time}]")
 
 async def set_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -168,7 +168,7 @@ async def set_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if len(context.args) < 2:
-        await update.message.reply_text("Foydalanish: `/stavka <Xodim_ID> <Kunlik_Stavka> [Kunlik_Soat]`")
+        await update.message.reply_text("Foydalanish: '/stavka <Xodim_ID> <Kunlik_Stavka> [Kunlik_Soat]'")
         return
 
     try:
@@ -181,13 +181,13 @@ async def set_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
 
         hourly = rate / hours
-        await update.message.reply_text(f"✅ ID `{target_user_id}` uchun stavka: {rate:,} so'm ({hours} soat). Soatligi: {int(hourly):,} so'm.")
+        await update.message.reply_text(f"✅ ID '{target_user_id}' uchun stavka: {rate:,} so'm ({hours} soat).")
     except ValueError:
         await update.message.reply_text("Xatolik! ID, Summa va Soat raqam bo'lishi kerak.")
 
 def get_calculated_salary_data(days_limit=None):
     if days_limit:
-        start_date = (datetime.now() - timedelta(days=days_limit)).strftime("%Y-%m-%d 00:00:00")
+        start_date = ((datetime.now() + timedelta(hours=5)) - timedelta(days=days_limit)).strftime("%Y-%m-%d 00:00:00")
         cursor.execute("SELECT user_id, user_name, action, date_time FROM attendance WHERE date_time >= ? ORDER BY user_id, date_time ASC", (start_date,))
     else:
         cursor.execute("SELECT user_id, user_name, action, date_time FROM attendance ORDER BY user_id, date_time ASC")
@@ -249,14 +249,14 @@ async def calculate_salary(update: Update, context: ContextTypes.DEFAULT_TYPE, d
         await update.message.reply_text("Ko'rsatilgan davr uchun ma'lumot topilmadi.")
         return
 
-    title_text = f"⏱ **Oxirgi {days_limit} kunlik hisoblangan maoshlar:**\n\n" if days_limit else "💵 **Barcha davr uchun soatbay oylik maoshlari:**\n\n"
+    title_text = f"📊 **Oxirgi {days_limit} kunlik hisoblangan maoshlar:**\n\n" if days_limit else "📊 **Barcha davr uchun hisoblangan maoshlar:**\n\n"
     response = title_text
 
     for item in data:
         response += f"👤 **{item['name']}** (ID: `{item['user_id']}`):\n"
-        response += f"   • Ishlagani: {item['hours']} soat {item['minutes']} daqiqa\n"
-        response += f"   • Soatlik stavka: {item['hourly_rate']:,} so'm\n"
-        response += f"   • **Hisoblangan summa:** {item['total_pay']:,} so'm\n\n"
+        response += f"  • Ishlagani: {item['hours']} soat {item['minutes']} daqiqa\n"
+        response += f"  • Soatlik stavka: {item['hourly_rate']:,} so'm\n"
+        response += f"  • **Hisoblangan summa:** {item['total_pay']:,} so'm\n\n"
 
     await update.message.reply_text(response)
 
@@ -289,7 +289,7 @@ async def export_salary_excel(update: Update, context: ContextTypes.DEFAULT_TYPE
     file_name = "Oylik_Hisoboti_15kun.xlsx" if days_limit else "Oylik_Hisoboti_Toliq.xlsx"
     wb.save(file_name)
 
-    caption_text = f"📊 Oxirgi {days_limit} kunlik oylik hisoboti Excel faylda!" if days_limit else "📊 Barcha davr uchun to'liq oylik hisoboti Excel faylda!"
+    caption_text = f"📊 Oxirgi {days_limit} kunlik oylik hisoboti Excel faylda!" if days_limit else "📊 Barcha davr uchun oylik hisoboti Excel faylda!"
     with open(file_name, "rb") as file:
         await update.message.reply_document(document=file, filename=file_name, caption=caption_text)
 
@@ -337,10 +337,10 @@ app.add_handler(CommandHandler("oylikexcel", export_full_salary_excel))
 app.add_handler(CommandHandler("15kunexcel", export_15_salary_excel))
 app.add_handler(CommandHandler("stavka", set_rate))
 
-app.add_handler(MessageHandler(filters.VIDEO_NOTE, handle_video_note))
 app.add_handler(CallbackQueryHandler(button_click))
+app.add_handler(MessageHandler(filters.VIDEO_NOTE, handle_video_note))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 
-print("Bot va veb-server ishga tushdi...")
+print("Bot ishga tushdi...")
 app.run_polling()
         
