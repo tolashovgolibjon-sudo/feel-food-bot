@@ -341,3 +341,28 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_mess
 
 print("Bot ishga tushdi...")
 app.run_polling()
+from flask import Flask
+from threading import Thread
+import os
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot faol va ishlamoqda!"
+
+def run():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+# Telegram botni ishga tushirishdan OLDIN ushbu funksiyani chaqiring:
+if __name__ == "__main__":
+    keep_alive()  # Veb-serverni orqa fonda ishga tushiradi
+    
+    # Shu yerda o'zingizning Telegram botni ishga tushirish kodingiz turadi:
+    # (masalan: executor.start_polling, bot.infinity_polling va h.k.)
+    
