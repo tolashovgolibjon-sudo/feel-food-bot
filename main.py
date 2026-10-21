@@ -1,8 +1,30 @@
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 import sqlite3
 from datetime import datetime, timedelta
 import openpyxl
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+
+# --- RENDER PORT TALabini qondirish uchun kichik veb-server ---
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive and running!")
+    
+    def log_message(self, format, *args):
+        pass  # Loglarni to'ldirib yubormasligi uchun
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
+
+# Veb-serverni alohida oqimda (thread) ishga tushiramiz
+threading.Thread(target=run_web_server, daemon=True).start()
+# -------------------------------------------------------------
 
 TOKEN = "8962973921:AAExSSAU4OIlhze7mYnaPF4nFQalqERd3cg"
 
@@ -163,7 +185,6 @@ async def set_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("Xatolik! ID, Summa va Soat raqam bo'lishi kerak.")
 
-# Oyliklarni hisoblovchi umumiy yordamchi funksiya (matn yoki excel uchun)
 def get_calculated_salary_data(days_limit=None):
     if days_limit:
         start_date = (datetime.now() - timedelta(days=days_limit)).strftime("%Y-%m-%d 00:00:00")
@@ -217,7 +238,6 @@ def get_calculated_salary_data(days_limit=None):
 
     return results
 
-# Matnli oylik hisoboti
 async def calculate_salary(update: Update, context: ContextTypes.DEFAULT_TYPE, days_limit=None):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
@@ -246,7 +266,6 @@ async def calculate_full_salary(update: Update, context: ContextTypes.DEFAULT_TY
 async def calculate_15_days_salary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await calculate_salary(update, context, days_limit=15)
 
-# Oylikni Excel formatida chiqarish
 async def export_salary_excel(update: Update, context: ContextTypes.DEFAULT_TYPE, days_limit=None):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
@@ -280,7 +299,6 @@ async def export_full_salary_excel(update: Update, context: ContextTypes.DEFAULT
 async def export_15_salary_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await export_salary_excel(update, context, days_limit=15)
 
-# Davomatni Excelga chiqarish
 async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
@@ -305,8 +323,8 @@ async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_name = "Davomat_Hisoboti.xlsx"
     wb.save(file_name)
 
-    with open(file_name, "rb") as file:
-        await update.message.reply_document(document=file, filename=file_name, caption="📊 Davomat hisoboti Excel faylda!")
+    with open(file_name, "rb") as info_file:
+        await update.message.reply_document(document=info_file, filename=file_name, caption="📊 Davomat hisoboti Excel faylda!")
 
 app = Application.builder().token(TOKEN).build()
 
@@ -315,13 +333,14 @@ app.add_handler(CommandHandler("admin", admin_panel))
 app.add_handler(CommandHandler("excel", export_excel))
 app.add_handler(CommandHandler("oylik", calculate_full_salary))
 app.add_handler(CommandHandler("15kun", calculate_15_days_salary))
-app.add_handler(CommandHandler("oylikexcel", export_full_salary_excel)) # Yangi buyruq
-app.add_handler(CommandHandler("15kunexcel", export_15_salary_excel))   # Yangi buyruq
+app.add_handler(CommandHandler("oylikexcel", export_full_salary_excel))
+app.add_handler(CommandHandler("15kunexcel", export_15_salary_excel))
 app.add_handler(CommandHandler("stavka", set_rate))
 
 app.add_handler(MessageHandler(filters.VIDEO_NOTE, handle_video_note))
 app.add_handler(CallbackQueryHandler(button_click))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 
-print("Oyliklarni Excelga chiqarish imkoniyati qo'shildi...")
+print("Bot va veb-server ishga tushdi...")
 app.run_polling()
+        
