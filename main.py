@@ -27,7 +27,7 @@ threading.Thread(target=run_web_server, daemon=True).start()
 
 TOKEN = "8767402192:AAGBYKWVmoLb74B1BKXo-98DVqQgd3eJ9U8" # <--- СЮДА ВСТАВЬТЕ НОВЫЙ ТОКЕН
 
-ADMIN_ID = 1449598743 # Ваш Telegram ID
+ADMIN_ID = 1631414170 # Ваш Telegram ID
 
 DEFAULT_DAILY_SALARY = 300000
 DEFAULT_WORK_HOURS = 12
