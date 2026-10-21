@@ -345,9 +345,9 @@ from flask import Flask
 from threading import Thread
 import os
 
-app = Flask('')
+app_flask = Flask('')
 
-@app.route('/')
+@app_flask.route('/')
 def home():
     return "Bot faol va ishlamoqda!"
 
