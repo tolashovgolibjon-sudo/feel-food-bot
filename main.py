@@ -26,7 +26,7 @@ def run_web_server():
 threading.Thread(target=run_web_server, daemon=True).start()
 # ------------------------------------------------------------
 
-TOKEN = "8962973921:AAGtAGuqmUmXRc3e5EOdEkxyHCD5Oa8Icx0"
+TOKEN = "8962973921:AAFPu5p1tHpLDFsHR7uOKjfVuAuNFU1IAlY"
 
 ADMIN_ID = 1449598743 # <--- HAQIQIY TELEGRAM ID RAQAMINGIZNI YOZING!
 
