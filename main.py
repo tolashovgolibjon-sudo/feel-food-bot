@@ -7,7 +7,7 @@ import openpyxl
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
-# --- RENDER PORT TALABINI QONDIRISH UCHUN KICHIK VEB-SERVER ---
+# --- РАБОТА С ВЕБ-СЕРВЕРОМ ДЛЯ RENDER ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -15,20 +15,19 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"Bot is alive and running!")
 
     def log_message(self, self_format, *args):
-        pass # Loglarni to'ldirib yubormasligi uchun
+        pass
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
     server.serve_forever()
 
-# Veb-serverni alohida oqimda (thread) ishga tushiramiz
 threading.Thread(target=run_web_server, daemon=True).start()
-# ------------------------------------------------------------
+# ----------------------------------------
 
-TOKEN = "8962973921:AAFPu5p1tHpLDFsHR7uOKjfVuAuNFU1IAlY"
+TOKEN = "8767402192:AAGBYKWVmoLb74B1BKXo-98DVqQgd3eJ9U8" # <--- СЮДА ВСТАВЬТЕ НОВЫЙ ТОКЕН
 
-ADMIN_ID = 1449598743 # <--- HAQIQIY TELEGRAM ID RAQAMINGIZNI YOZING!
+ADMIN_ID = 1449598743 # Ваш Telegram ID
 
 DEFAULT_DAILY_SALARY = 300000
 DEFAULT_WORK_HOURS = 12
@@ -180,7 +179,6 @@ async def set_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
                        (target_user_id, rate, hours))
         conn.commit()
 
-        hourly = rate / hours
         await update.message.reply_text(f"✅ ID '{target_user_id}' uchun stavka: {rate:,} so'm ({hours} soat).")
     except ValueError:
         await update.message.reply_text("Xatolik! ID, Summa va Soat raqam bo'lishi kerak.")
@@ -324,7 +322,7 @@ async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     wb.save(file_name)
 
     with open(file_name, "rb") as info_file:
-        await update.message.reply_document(document=info_file, filename=file_name, caption="📊 Davomat hisoboti Excel faylda!")
+        await update.message.reply_document(document=file, filename=file_name, caption="📊 Davomat hisoboti Excel faylda!")
 
 app = Application.builder().token(TOKEN).build()
 
@@ -343,4 +341,3 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_mess
 
 print("Bot ishga tushdi...")
 app.run_polling()
-        
