@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # Token va Admin ID sozlamalari
-TOKEN = os.environ.get("8767402192:AAGQJDclo-kPeufBD1VqXWkXzd7keV2i86c", "SIZNING_BOT_TOKENINGIZ")
+TOKEN = "8767402192:AAGQJDclo-kPeufBD1VqXWkXzd7keV2i86c"
 ADMIN_ID = 1631414170  # O'zingizning rahbar ID raqamingizni yozing (agar boshqacha bo'lsa)
 
 # ==========================================
