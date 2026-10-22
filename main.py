@@ -11,7 +11,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 # ==========================================
 # SOZLAMALAR VA OFIS GEOLOKATSIYASI
 # ==========================================
-TOKEN = "8767402192:AAGQJDclo-KPeufBD1VqxR..."  # O'zingizning tokeningiz
+TOKEN = "8767402192:AAGDA4zyaff9Q7zxgnOWh2uJNX-G2_BaAbc"  # O'zingizning tokeningiz
 ADMIN_ID = 1631414170                            # Rahbarning ID raqami
 
 # Ofis koordinatalari (Chust / Namangan)
