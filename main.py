@@ -273,18 +273,25 @@ async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 3. ASOSIY ISHGA TUSHIRISH (MAIN)
 # ==========================================
 if __name__ == "__main__":
+    # Flask serverni ishga tushiramiz
+    keep_alive()
+    
+    # Telegram bot dasturini tuzamiz
     app = Application.builder().token(TOKEN).build()
 
+    # Buyruqlar va hodisalar
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("qosh", add_employee))
     app.add_handler(CommandHandler("stavka", set_rate))
     app.add_handler(CommandHandler("excel", export_excel))
     app.add_handler(CallbackQueryHandler(button_click))
-    app.add_handler(MessageHandler(filters.VIDEO_NOTE, handle_video_note))
+    
+    # Krujok va video xabarlarni tutib olish
+    app.add_handler(MessageHandler(filters.VIDEO_NOTE | filters.VIDEO, handle_video_note))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
 
-    keep_alive()
-
-    print("Bot ishga tushdi...")
-    app.run_polling()
+    print("Bot muvaffaqiyatli ishga tushdi...")
+    
+    # Pollingni barcha turdagi xabarlarni qabul qiladigan qilib ishga tushiramiz
+    app.run_polling(allowed_updates=["message", "edited_message", "callback_query"])
     
