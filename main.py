@@ -30,7 +30,24 @@ def keep_alive():
 # ==========================================
 # 2. BOTNING ASOSIY FUNKSIYALARI VA EXCEL
 # ==========================================
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+async def handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Tugmalarni yaratish
+    keyboard = [
+        [
+            InlineKeyboardButton("Keldim 🟢", callback_data="keldim"),
+            InlineKeyboardButton("Kettim 🔴", callback_data="kettim")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Video xabarga javoban tugmalar bilan birga xabar yuborish
+    await update.message.reply_text(
+        "Harakatni tanlang:", 
+        reply_markup=reply_markup
+    )
+    
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Assalomu alaykum! Bot 24/7 rejimida ishlamoqda.")
 
