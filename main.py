@@ -1,145 +1,182 @@
 import os
+import logging
 import sqlite3
 import math
-from datetime import datetime
-import openpyxl
+from datetime import datetime, timezone, timedelta
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from flask import Flask
 from threading import Thread
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
-# ==========================================
-# SOZLAMALAR VA OFIS GEOLOKATSIYASI
-# ==========================================
-TOKEN = "8767402192:AAH5xDUsI78Kr4kg51l8yDsXbMX7RggpG1k"  # O'zingizning tokeningiz
-ADMIN_ID = 1631414170                            # Rahbarning ID raqami
+# Logging sozlamalari
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Ofis koordinatalari (Chust / Namangan)
-OFFICE_LAT = 41.003753
+# Token va Admin ID lari
+TOKEN = "8767402192:AAH5xDUsI78Kr4kg51l8yDsXbMX7RggpG1k", "SIZNING_TOKENINGIZNI_SHU_YERga_YOZING")
+ADMIN_IDS = [1631414170]  # Sizning Telegram ID raqamingiz
+
+# O'zbekiston vaqt zonasi (UTC+5)
+UZB_TIMEZONE = timezone(timedelta(hours=5))
+
+# Ofis koordinatalari (Siz yuborgan aniq koordinatalar)
+OFFICE_LAT = 41.003753  
 OFFICE_LON = 71.672794  
-ALLOWED_RADIUS_METERS = 150  # Ruxsat etilgan radius (metrda)
+MAX_DISTANCE_METERS = 200  # Ofisdan ruxsat etilgan maksimal masofa (metrda)
 
-# ==========================================
-# BAZANI (DATABASE) YARATISH
-# ==========================================
-conn = sqlite3.connect('attendance.db', check_same_thread=False)
-cursor = conn.cursor()
+# Ma'lumotlar bazasini yaratish (SQLite)
+def init_db():
+    conn = sqlite3.connect("bot_database.db")
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS employees (
+            id TEXT PRIMARY KEY,
+            name TEXT,
+            rate REAL DEFAULT 0,
+            hours REAL DEFAULT 0,
+            check_in_time TEXT DEFAULT NULL,
+            awaiting_location INTEGER DEFAULT 0
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS attendance (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        user_name TEXT,
-        action TEXT,
-        date_time TEXT
-    )
-''')
-
-# Smena stavkasi va soati saqlanadigan jadval
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS rates (
-        user_id INTEGER PRIMARY KEY,
-        shift_rate REAL,
-        shift_hours REAL
-    )
-''')
-
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS employees (
-        user_id INTEGER PRIMARY KEY,
-        user_name TEXT
-    )
-''')
-conn.commit()
-
-# Masofani hisoblash funksiyasi (Haversine formulasi)
+# GPS masofani hisoblash (Haversine formulasi)
 def calculate_distance(lat1, lon1, lat2, lon2):
-    R = 6371000  # Yer radiusi (metrda)
+    R = 6371000  # Yer radiusi metrda
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
-
-    a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    
+    a = math.sin(dphi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda/2)**2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
     return R * c
 
-# ==========================================
-# 1. FLASK VEB-SERVER QISMI (UptimeRobot uchun)
-# ==========================================
-app_flask = Flask('')
+# Flask server (Render 24/7 ishlashi uchun)
+web_app = Flask("")
 
-@app_flask.route('/')
+@web_app.route("/")
 def home():
-    return "Bot faol va ishlamoqda!"
+    return "Bot ishlayapti!"
 
-def run():
-    port = int(os.environ.get("PORT", 8080))
-    app_flask.run(host='0.0.0.0', port=port)
+def run_web():
+    web_app.run(host="0.0.0.0", port=8080)
 
 def keep_alive():
-    t = Thread(target=run)
+    t = Thread(target=run_web)
     t.start()
 
-# ==========================================
-# 2. BOT FUNKSIYALARI
-# ==========================================
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Assalomu alaykum! Moslashuvchan smena stavkali davomat boti ishga tushdi.")
+    await update.message.reply_text(
+        "🤖 Salom! Bu GPS va davomat nazoratli ish haqi bot.\n\n"
+        "📋 **Admin buyruqlari:**\n"
+        "/qosh [ID] [Ism] - Xodim qo'shish\n"
+        "/ochir [ID] - Xodimni ishdan bo'shatish\n"
+        "/stavka [ID] [Summa] - Soatlik stavka belgilash\n"
+        "/xodimlar - Xodimlar ro'yxatini ko'rish\n"
+        "/reset - Soatlarni nollash\n"
+        "/excel - Maxfiy hisobotni shaxsiy chatga olish"
+    )
 
-# Xodimni bazaga qo'shish (/qosh [user_id] [Ism])
 async def add_employee(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("Kechirasiz, bu buyruq faqat rahbar uchun! ❌")
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Kechirasiz, bu buyruqni faqat admin ishlata oladi!")
         return
-
-    args = context.args
-    if len(args) < 2:
-        await update.message.reply_text("⚠️ Xato! Ishlatish tartibi:\n`/qosh XODIM_ID Xodim_Ismi`\nMasalan: `/qosh 123456789 Anvar`", parse_mode="Markdown")
-        return
-
     try:
-        emp_id = int(args[0])
+        args = context.args
+        emp_id = args[0]
         emp_name = " ".join(args[1:])
         
-        cursor.execute("REPLACE INTO employees (user_id, user_name) VALUES (?, ?)", (emp_id, emp_name))
+        conn = sqlite3.connect("bot_database.db")
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO employees (id, name, rate, hours, check_in_time, awaiting_location) VALUES (?, ?, 0, 0, NULL, 0)", (emp_id, emp_name))
         conn.commit()
-        await update.message.reply_text(f"✅ Xodim muvaffaqiyatli qo'shildi:\nID: `{emp_id}`\nIsm: {emp_name}", parse_mode="Markdown")
-    except ValueError:
-        await update.message.reply_text("Xatolik! ID faqat raqamlardan iborat bo'lishi kerak.")
-
-# Stavka, summa va soatni kiritish (/stavka [user_id] [summa] [soat])
-async def set_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("Kechirasiz, bu buyruq faqat rahbar uchun! ❌")
-        return
-
-    args = context.args
-    if len(args) < 3:
-        await update.message.reply_text("⚠️ Xato! Ishlatish tartibi:\n`/stavka XODIM_ID SUMMA SOAT`\nMasalan: `/stavka 123456789 150000 12`", parse_mode="Markdown")
-        return
-
-    try:
-        target_user_id = int(args[0])
-        rate = float(args[1])
-        hours = float(args[2])
+        conn.close()
         
-        cursor.execute("REPLACE INTO rates (user_id, shift_rate, shift_hours) VALUES (?, ?, ?)", (target_user_id, rate, hours))
-        conn.commit()
-        await update.message.reply_text(f"✅ Xodim (ID: {target_user_id}) uchun **{hours} soatlik** smena stavkasi **{rate:,.0f} so'm** etib belgilandi!", parse_mode="Markdown")
-    except ValueError:
-        await update.message.reply_text("Xatolik! ID, summa va soat raqam bo'lishi kerak.")
+        await update.message.reply_text(f"✅ Xodim muvaffaqiyatli qo'shildi:\n🆔 ID: {emp_id}\n👤 Ism: {emp_name}")
+    except Exception as e:
+        await update.message.reply_text("❌ Xatolik! Foydalanish: /qosh [ID] [Ism]")
 
-# Guruhga video xabar (krujok) tashlanganda tekshirish
-async def handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-
-    cursor.execute("SELECT user_id FROM employees WHERE user_id = ?", (user_id,))
-    if not cursor.fetchone() and user_id != ADMIN_ID:
+async def remove_employee(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Kechirasiz, bu buyruqni faqat admin ishlata oladi!")
         return
+    try:
+        args = context.args
+        emp_id = args[0]
+        
+        conn = sqlite3.connect("bot_database.db")
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM employees WHERE id = ?", (emp_id,))
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        if deleted > 0:
+            await update.message.reply_text(f"✅ Xodim (ID: {emp_id}) ro'yxatdan o'chirildi!")
+        else:
+            await update.message.reply_text("❌ Bunday ID raqamdagi xodim topilmadi!")
+    except Exception as e:
+        await update.message.reply_text("❌ Xatolik! Foydalanish: /ochir [ID]")
 
+async def set_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Kechirasiz, bu buyruqni faqat admin ishlata oladi!")
+        return
+    try:
+        args = context.args
+        emp_id = args[0]
+        rate = float(args[1])
+        
+        conn = sqlite3.connect("bot_database.db")
+        cursor = conn.cursor()
+        cursor.execute("UPDATE employees SET rate = ? WHERE id = ?", (rate, emp_id))
+        updated = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        if updated > 0:
+            await update.message.reply_text(f"✅ Xodim (ID: {emp_id}) uchun soatlik stavka: {rate:,.0f} so'm etib belgilandi!")
+        else:
+            await update.message.reply_text("❌ Bunday ID raqamdagi xodim topilmadi!")
+    except Exception as e:
+        await update.message.reply_text("❌ Xatolik! Foydalanish: /stavka [ID] [Summa]")
+
+async def list_employees(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Bu buyruq faqat admin uchun!")
+        return
+    
+    conn = sqlite3.connect("bot_database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name, rate, hours FROM employees")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if not rows:
+        await update.message.reply_text("📊 Hozircha xodimlar ro'yxati bo'sh.")
+        return
+        
+    text = "👥 **Xodimlar ro'yxati va hisobi:**\n\n"
+    for r in rows:
+        salary = r[2] * r[3]
+        text += f"🆔 ID: {r[0]}\n👤 Ism: {r[1]}\n💰 Stavka: {r[2]:,.0f} so'm/soat\n⏳ Ishlagan soati: {r[3]:.2f} soat\n💵 Hisoblangan oylik: {salary:,.0f} so'm\n-------------------\n"
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+async def reset_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Bu buyruq faqat admin uchun!")
+        return
+    
+    conn = sqlite3.connect("bot_database.db")
+    cursor = conn.cursor()
+    cursor.execute("UPDATE employees SET hours = 0, check_in_time = NULL, awaiting_location = 0")
+    conn.commit()
+    conn.close()
+    await update.message.reply_text("🔄 Barcha xodimlarning ishlagan soatlari nollashtirildi.")
+
+async def handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("Keldim 🟢", callback_data="keldim"),
@@ -147,151 +184,163 @@ async def handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Iltimos, harakatni tanlang:", reply_markup=reply_markup)
+    await update.message.reply_text("Davomat uchun quyidagi tugmani bosing:", reply_markup=reply_markup)
 
-# Tugma bosilganda GPS so'rash
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    action = "Keldim" if query.data == "keldim" else "Kettim"
-    context.user_data['pending_action'] = action
-
-    location_keyboard = [[KeyboardButton("📍 Turgan joyimni yuborish", request_location=True)]]
-    reply_markup = ReplyKeyboardMarkup(location_keyboard, one_time_keyboard=True, resize_keyboard=True)
-
-    await query.edit_message_text(text=f"Siz **{action}** tugmasini bosdingiz. Ofisda ekanligingizni tasdiqlash uchun lokatsiyangizni yuboring:", parse_mode="Markdown")
-    await query.message.reply_text("Pastdagi tugmani bosing:", reply_markup=reply_markup)
-
-# Lokatsiyani qabul qilish va saqlash
-async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    user_id = user.id
-    user_name = user.full_name
+    user_id = str(query.from_user.id)
     
-    if 'pending_action' not in context.user_data:
+    conn = sqlite3.connect("bot_database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, rate, hours, check_in_time FROM employees WHERE id = ?", (user_id,))
+    emp = cursor.fetchone()
+    
+    if not emp:
+        conn.close()
+        await query.edit_message_text("❌ Siz xodimlar ro'yxatida emassiz yoki ID raqamingiz mos kelmadi.")
         return
-
-    action = context.user_data['pending_action']
-    user_location = update.message.location
-
-    if not user_location:
-        await update.message.reply_text("Iltimos, haqiqiy lokatsiyangizni yuboring!", reply_markup=ReplyKeyboardRemove())
-        return
-
-    distance = calculate_distance(user_location.latitude, user_location.longitude, OFFICE_LAT, OFFICE_LON)
-
-    if distance <= ALLOWED_RADIUS_METERS:
-        date_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute("INSERT INTO attendance (user_id, user_name, action, date_time) VALUES (?, ?, ?, ?)",
-                       (user_id, user_name, action, date_time))
+        
+    name, rate, hours, check_in_time = emp
+    
+    if query.data == "keldim":
+        if check_in_time:
+            conn.close()
+            await query.edit_message_text(f"⚠️ Siz allaqachon kelganingizni qayd etgansiz!\n⏰ Vaqt: {check_in_time}")
+            return
+            
+        # GPS lokatsiyani kuta boshlash
+        cursor.execute("UPDATE employees SET awaiting_location = 1 WHERE id = ?", (user_id,))
         conn.commit()
+        conn.close()
+        
+        # Lokatsiya so'rash uchun maxsus tugma
+        location_keyboard = [[KeyboardButton("📍 GPS Lokatsiyani yuborish", request_location=True)]]
+        reply_markup = ReplyKeyboardMarkup(location_keyboard, resize_keyboard=True, one_time_keyboard=True)
+        
+        await query.message.reply_text(
+            f"📍 {name}, ish joyida ekanligingizni tasdiqlash uchun pastdagi tugmani bosing va **GPS lokatsiyangizni** yuboring:",
+            reply_markup=reply_markup
+        )
+        await query.edit_message_text("✅ Davomat so'rovi qabul qilindi. Iltimos, lokatsiyani yuboring.")
+        
+    elif query.data == "kettim":
+        if not check_in_time:
+            conn.close()
+            await query.edit_message_text("⚠️ Siz hali 'Keldim' deb qayd etmagansiz!")
+            return
+            
+        current_time = datetime.now(UZB_TIMEZONE)
+        current_time_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
+        check_in_dt = datetime.fromisoformat(check_in_time)
+        diff_hours = (current_time - check_in_dt).total_seconds() / 3600.0
+        new_hours = hours + diff_hours
+        
+        cursor.execute("UPDATE employees SET hours = ?, check_in_time = NULL, awaiting_location = 0 WHERE id = ?", (new_hours, user_id))
+        conn.commit()
+        conn.close()
+        
+        await query.edit_message_text(
+            f"🔴 Ketganingiz qayd etildi, {name}!\n"
+            f"⏰ Vaqt: {current_time_str}\n"
+            f"⏳ Bu smenada: {diff_hours:.2f} soat\n"
+            f"📊 Jami ishlangan: {new_hours:.2f} soat"
+        )
 
+async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    
+    conn = sqlite3.connect("bot_database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, awaiting_location FROM employees WHERE id = ?", (user_id,))
+    emp = cursor.fetchone()
+    
+    if not emp or emp[1] != 1:
+        conn.close()
+        return
+        
+    name, awaiting = emp
+    user_location = update.message.location
+    
+    if not user_location:
+        conn.close()
+        await update.message.reply_text("❌ Iltimos, lokatsiyani to'g'ri yuboring!")
+        return
+        
+    user_lat = user_location.latitude
+    user_lon = user_location.longitude
+    
+    # Masofani hisoblash (metrda)
+    distance = calculate_distance(user_lat, user_lon, OFFICE_LAT, OFFICE_LON)
+    
+    if distance <= MAX_DISTANCE_METERS:
+        current_time = datetime.now(UZB_TIMEZONE)
+        current_time_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
+        
+        cursor.execute("UPDATE employees SET check_in_time = ?, awaiting_location = 0 WHERE id = ?", (current_time.isoformat(), user_id))
+        conn.commit()
+        conn.close()
+        
         await update.message.reply_text(
-            f"✅ Tasdiqlandi! {user_name} — {action} sifatida belgilandi.\n📍 Ofisdan masofa: {int(distance)} metr.\nVaqt: {date_time}",
+            f"✅ Tabriklaymiz, {name}! Ofisga yaqin ekansiz (Masofa: {distance:.0f} metr).\n"
+            f"🟢 Kelgan vaqtingiz qayd etildi: {current_time_str}",
             reply_markup=ReplyKeyboardRemove()
         )
     else:
+        conn.close()
         await update.message.reply_text(
-            f"❌ Xatolik! Siz ofis hududida emassiz.\n📍 Masofangiz: {int(distance)} metr (Ruxsat etilgan limit: {ALLOWED_RADIUS_METERS} m).",
+            f"❌ Xatolik! Siz ofisdan juda uzoqdasiz.\n"
+            f"📍 Masofa: {distance:.0f} metr (Ruxsat etilgan limit: {MAX_DISTANCE_METERS} metr).\n"
+            f"Iltimos, ish joyiga yaqinroq kelib qayta urinib ko'ring.",
             reply_markup=ReplyKeyboardRemove()
         )
-    
-    context.user_data.pop('pending_action', None)
 
-# HAMMA MA'LUMOTLARNI EXCEL FORMATDA YUBORISH (/excel)
 async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("Kechirasiz, bu buyruq faqat rahbar uchun! ❌")
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Bu buyruq faqat admin uchun!")
         return
-
-    wb = openpyxl.Workbook()
     
-    # 1-sahifa: Davomat tarixi
-    ws_att = wb.active
-    ws_att.title = "Davomat"
-    ws_att.append(["Xodim ID", "Xodim Ismi", "Harakat", "Sana va Vaqt"])
+    conn = sqlite3.connect("bot_database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name, rate, hours FROM employees")
+    rows = cursor.fetchall()
+    conn.close()
     
-    cursor.execute("SELECT user_id, user_name, action, date_time FROM attendance ORDER BY date_time ASC")
-    for row in cursor.fetchall():
-        ws_att.append(row)
+    report = "📊 **Xodimlar davomat va ish haqi yakuniy hisoboti:**\n\n"
+    if not rows:
+        report += "Hozircha xodimlar ma'lumotlari mavjud emas."
+    else:
+        total_payout = 0
+        for r in rows:
+            salary = r[2] * r[3]
+            total_payout += salary
+            report += f"🆔 ID: {r[0]}\n👤 Ism: {r[1]}\n💰 Stavka: {r[2]:,.0f} so'm\n⏳ Soat: {r[3]:.2f}\n💵 Oylik: {salary:,.0f} so'm\n-------------------\n"
+        report += f"\n💎 **Jami to'lanishi kerak:** {total_payout:,.0f} so'm"
+    
+    try:
+        await context.bot.send_message(chat_id=ADMIN_IDS[0], text=report, parse_mode="Markdown")
+        await update.message.reply_text("✅ Maxfiy hisobot shaxsiy chatingizga yuborildi!")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Xatolik yuz berdi: {e}")
 
-    # 2-sahifa: Oylik hisob-kitoblar (Har bir xodimning o'zining belgilangan soati va summasi asosida)
-    ws_sal = wb.create_sheet(title="Oylik Hisoboti")
-    ws_sal.append(["Xodim ID", "Xodim Ismi", "Smena Summasi", "Smena Soati", "Jami Ishlagan Soat", "Hisoblangan Maosh (so'm)"])
-
-    cursor.execute("SELECT user_id, user_name FROM employees")
-    employees = cursor.fetchall()
-
-    for emp_id, emp_name in employees:
-        # Stavka va soatni olish
-        cursor.execute("SELECT shift_rate, shift_hours FROM rates WHERE user_id = ?", (emp_id,))
-        rate_row = cursor.fetchone()
-        
-        if rate_row:
-            shift_rate = rate_row[0]
-            shift_hours = rate_row[1]
-        else:
-            shift_rate = 0
-            shift_hours = 12  # Standart 12 deb olinadi agar belgilanmagan bo'lsa
-
-        # 1 soatlik haqni hisoblash
-        hourly_equivalent = (shift_rate / shift_hours) if shift_hours > 0 else 0
-
-        # Ishlagan vaqtini hisoblash
-        cursor.execute("SELECT action, date_time FROM attendance WHERE user_id = ? ORDER BY date_time ASC", (emp_id,))
-        records = cursor.fetchall()
-
-        total_seconds = 0
-        last_in_time = None
-        for action, dt_str in records:
-            dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
-            if action == "Keldim":
-                last_in_time = dt
-            elif action == "Kettim" and last_in_time:
-                diff = (dt - last_in_time).total_seconds()
-                if diff > 0:
-                    total_seconds += diff
-                last_in_time = None
-
-        total_hours = total_seconds / 3600
-        total_salary = total_hours * hourly_equivalent
-
-        ws_sal.append([emp_id, emp_name, shift_rate, shift_hours, round(total_hours, 2), round(total_salary, 2)])
-
-    file_name = "Moslashuvchan_Hisobot.xlsx"
-    wb.save(file_name)
-
-    with open(file_name, "rb") as file:
-        await update.message.reply_document(
-            document=file, 
-            filename=file_name, 
-            caption="📊 **Hisobot tayyor!**\nHar bir xodimning o'zi belgilangan soatlik smenasi va ishlagan vaqtiga qarab oylik maoshlari hisoblandi."
-        )
-
-# ==========================================
-# 3. ASOSIY ISHGA TUSHIRISH (MAIN)
-# ==========================================
 if __name__ == "__main__":
-    # Flask serverni ishga tushiramiz
+    init_db()
     keep_alive()
     
-    # Telegram bot dasturini tuzamiz
     app = Application.builder().token(TOKEN).build()
 
-    # Buyruqlar va hodisalar
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("qosh", add_employee))
+    app.add_handler(CommandHandler("ochir", remove_employee))
     app.add_handler(CommandHandler("stavka", set_rate))
+    app.add_handler(CommandHandler("xodimlar", list_employees))
+    app.add_handler(CommandHandler("reset", reset_hours))
     app.add_handler(CommandHandler("excel", export_excel))
     app.add_handler(CallbackQueryHandler(button_click))
-    
-    # Krujok va video xabarlarni tutib olish
     app.add_handler(MessageHandler(filters.VIDEO_NOTE | filters.VIDEO, handle_video_note))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
 
     print("Bot muvaffaqiyatli ishga tushdi...")
-    
-    # Pollingni barcha turdagi xabarlarni qabul qiladigan qilib ishga tushiramiz
     app.run_polling(allowed_updates=["message", "edited_message", "callback_query"])
     
