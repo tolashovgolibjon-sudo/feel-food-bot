@@ -13,7 +13,7 @@ logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # Token va Admin ID lari
-TOKEN = "8767402192:AAF0TKS5Yc-S3W7SrxRCq7QQd9HHFft5GJI", "SIZNING_TOKENINGIZNI_SHU_YERga_YOZING")
+TOKEN = os.getenv "8767402192:AAF0TKS5Yc-S3W7SrxRCq7QQd9HHFft5GJI"
 ADMIN_IDS = [1631414170]  # Sizning Telegram ID raqamingiz
 
 # O'zbekiston vaqt zonasi (UTC+5)
