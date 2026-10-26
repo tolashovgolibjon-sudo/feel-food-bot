@@ -49,7 +49,7 @@ def keep_alive():
     t.start()
 
 # ---------------------------------------------------------
-# 3. BAZANI YARATISH
+# 3. BAZANI YARATISH (12 yoki 13 soatlik smena tizimi bilan)
 # ---------------------------------------------------------
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -59,7 +59,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS employees (
             user_id INTEGER PRIMARY KEY,
             full_name TEXT NOT NULL,
-            hourly_rate REAL NOT NULL,
+            shift_rate REAL NOT NULL,
+            shift_hours INTEGER NOT NULL DEFAULT 12,
             is_admin INTEGER DEFAULT 0
         )
     ''')
@@ -78,8 +79,8 @@ def init_db():
     ''')
     
     cursor.execute(
-        "INSERT OR IGNORE INTO employees (user_id, full_name, hourly_rate, is_admin) VALUES (?, ?, ?, ?)",
-        (ADMIN_TELEGRAM_ID, "Bosh Admin", 0.0, 1)
+        "INSERT OR IGNORE INTO employees (user_id, full_name, shift_rate, shift_hours, is_admin) VALUES (?, ?, ?, ?, ?)",
+        (ADMIN_TELEGRAM_ID, "Bosh Admin", 0.0, 12, 1)
     )
     
     conn.commit()
@@ -101,7 +102,7 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     return R * c
 
 # ---------------------------------------------------------
-# 5. ADMIN BUYRUQLARI (/qosh, /stavka, /ochir)
+# 5. ADMIN BUYRUQLARI
 # ---------------------------------------------------------
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -113,62 +114,77 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# /qosh <id> <FIO> <stavka>
+# /qosh <id> <FIO> <summa> <soat (12 yoki 13)>
 async def add_employee(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TELEGRAM_ID:
         await update.message.reply_text("❌ Bu buyruqni faqat admin bajarishi mumkin!")
         return
 
     args = context.args
-    if len(args) < 3:
-        await update.message.reply_text("⚠️ Xato format!\nIshlatish: `/qosh 123456789 Alisher_Tursunov 15000`", parse_mode="Markdown")
+    if len(args) < 4:
+        await update.message.reply_text(
+            "⚠️ Xato format!\n"
+            "To'g'ri ishlatish: `/qosh 1631414170 G'olibjon_To'lashov 150000 12`",
+            parse_mode="Markdown"
+        )
         return
 
     try:
         new_user_id = int(args[0])
         full_name = args[1].replace("_", " ")
-        hourly_rate = float(args[2])
+        shift_rate = float(args[2])
+        shift_hours = int(args[3])
     except ValueError:
-        await update.message.reply_text("❌ ID va stavka raqam bo'lishi kerak!")
+        await update.message.reply_text("❌ ID, summa va soat raqam shaklida bo'lishi kerak!")
         return
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT OR REPLACE INTO employees (user_id, full_name, hourly_rate, is_admin) VALUES (?, ?, ?, 0)",
-        (new_user_id, full_name, hourly_rate)
+        "INSERT OR REPLACE INTO employees (user_id, full_name, shift_rate, shift_hours, is_admin) VALUES (?, ?, ?, ?, 0)",
+        (new_user_id, full_name, shift_rate, shift_hours)
     )
     conn.commit()
     conn.close()
 
-    await update.message.reply_text(f"✅ Xodim qo'shildi:\n👤 {full_name} (ID: {new_user_id}) - {hourly_rate:,.0f} so'm/soat")
+    await update.message.reply_text(
+        f"✅ Xodim qo'shildi:\n"
+        f"👤 {full_name} (ID: {new_user_id})\n"
+        f"💰 Smena haqi: {shift_rate:,.0f} so'm\n"
+        f"⏰ Smena vaqti: {shift_hours} soatlik"
+    )
 
-# /stavka <id> <yangi_stavka>
+# /stavka <id> <yangi_summa> <soat (12 yoki 13)>
 async def update_stavka(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TELEGRAM_ID:
         await update.message.reply_text("❌ Faqat admin uchun!")
         return
 
     args = context.args
-    if len(args) < 2:
-        await update.message.reply_text("⚠️ Xato format!\nIshlatish: `/stavka 123456789 20000`", parse_mode="Markdown")
+    if len(args) < 3:
+        await update.message.reply_text(
+            "⚠️ Xato format!\n"
+            "To'g'ri ishlatish: `/stavka 1631414170 160000 13`",
+            parse_mode="Markdown"
+        )
         return
 
     try:
         target_id = int(args[0])
         new_rate = float(args[1])
+        new_hours = int(args[2])
     except ValueError:
-        await update.message.reply_text("❌ ID va stavka raqam bo'lishi kerak!")
+        await update.message.reply_text("❌ ID, summa va soat raqam bo'lishi kerak!")
         return
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("UPDATE employees SET hourly_rate = ? WHERE user_id = ?", (new_rate, target_id))
+    cursor.execute("UPDATE employees SET shift_rate = ?, shift_hours = ? WHERE user_id = ?", (new_rate, new_hours, target_id))
     if cursor.rowcount == 0:
         await update.message.reply_text("❌ Bu ID raqamdagi xodim topilmadi!")
     else:
         conn.commit()
-        await update.message.reply_text(f"✅ Xodimning (ID: {target_id}) stavkasi {new_rate:,.0f} so'mga o'zgartirildi.")
+        await update.message.reply_text(f"✅ Xodim (ID: {target_id}) stavkasi {new_rate:,.0f} so'm ({new_hours} soatlik) qilib yangilandi.")
     conn.close()
 
 # /ochir <id>
@@ -199,10 +215,9 @@ async def delete_employee(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
 
 # ---------------------------------------------------------
-# 6. VIDEO ORQALI DAVOMATNI ISHGA TUSHIRISH
+# 6. VIDEO VA DUMALOQ VIDEO ORQALI DAVOMATNI CHIQarish
 # ---------------------------------------------------------
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Guruhda yoki shaxsiy chatda video yuborilganda tugmalarni chiqarish
     keyboard = [
         [
             InlineKeyboardButton("🟢 Keldim", callback_data="check_in"),
@@ -215,7 +230,6 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
-# Tugma bosilganda avtomatik geolakatsiya so'rash tugmasini chiqarish
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -236,7 +250,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data['pending_action'] = action
 
-    # Geolokatsiya yuborish uchun maxsus klaviatura chiqarish
     location_keyboard = ReplyKeyboardMarkup(
         [[KeyboardButton("📍 Geolokatsiyani yuborish", request_location=True)]],
         resize_keyboard=True,
@@ -249,7 +262,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ---------------------------------------------------------
-# 7. GPS LOKATSIYANI TEKSHIRISH VA SAQLASH
+# 7. GPS LOKATSIYANI TEKSHIRISH VA HISOB-KITOB
 # ---------------------------------------------------------
 async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_loc = update.message.location
@@ -279,9 +292,10 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
-    cursor.execute("SELECT hourly_rate FROM employees WHERE user_id = ?", (user_id,))
-    rate_row = cursor.fetchone()
-    hourly_rate = rate_row[0] if rate_row else 0.0
+    cursor.execute("SELECT shift_rate, shift_hours FROM employees WHERE user_id = ?", (user_id,))
+    emp_data = cursor.fetchone()
+    shift_rate = emp_data[0] if emp_data else 0.0
+    shift_hours = emp_data[1] if emp_data else 12
 
     if action == "check_in":
         cursor.execute("SELECT id FROM attendance WHERE user_id = ? AND date = ?", (user_id, today_str))
@@ -302,7 +316,7 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             check_in_dt = UZB_TZ.localize(datetime.datetime.strptime(f"{today_str} {check_in_str}", "%Y-%m-%d %H:%M:%S"))
             
             duration = (now_uzb - check_in_dt).total_seconds() / 3600.0
-            earned = round(duration * hourly_rate, 2)
+            earned = shift_rate
 
             cursor.execute(
                 "UPDATE attendance SET check_out = ?, hours_worked = ?, earned_money = ? WHERE id = ?",
@@ -311,8 +325,8 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.commit()
             await update.message.reply_text(
                 f"🔴 {user_name}, ishdan ketgan vaqtingiz qayd etildi: {time_str}\n"
-                f"⏱ Ishlangan vaqt: {round(duration, 2)} soat\n"
-                f"💰 Hisoblangan maosh: {earned:,.0f} so'm",
+                f"⏱ Smena vaqti: {shift_hours} soatlik\n"
+                f"💰 Hisoblangan smena haqi: {earned:,.0f} so'm",
                 reply_markup=ReplyKeyboardRemove()
             )
 
@@ -348,7 +362,7 @@ async def excel_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if sub_command == "kun":
         today_str = datetime.datetime.now(UZB_TZ).strftime("%Y-%m-%d")
         ws.title = f"Kunlik-{today_str}"
-        ws.append(["Xodim FIO", "Sana", "Kelgan vaqt", "Ketgan vaqt", "Ish vaqti (soat)", "Maosh (so'm)"])
+        ws.append(["Xodim FIO", "Sana", "Kelgan vaqt", "Ketgan vaqt", "Ish vaqti (soat)", "Smena Haqi (so'm)"])
 
         cursor.execute('''
             SELECT e.full_name, a.date, a.check_in, a.check_out, a.hours_worked, a.earned_money 
@@ -366,7 +380,7 @@ async def excel_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         start_date = args[1]
         end_date = args[2]
         ws.title = "Maosh-Hisoboti"
-        ws.append(["Xodim FIO", "Sana", "Kelgan vaqt", "Ketgan vaqt", "Ish vaqti (soat)", "Maosh (so'm)"])
+        ws.append(["Xodim FIO", "Sana", "Kelgan vaqt", "Ketgan vaqt", "Ish vaqti (soat)", "Smena Haqi (so'm)"])
 
         cursor.execute('''
             SELECT e.full_name, a.date, a.check_in, a.check_out, a.hours_worked, a.earned_money 
@@ -416,12 +430,15 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("stavka", update_stavka))
     app.add_handler(CommandHandler("ochir", delete_employee))
     app.add_handler(CommandHandler("excel", excel_report))
-    app.add_handler(CommandHandler("exsel", excel_report)) # Xatolik yozilsa ham ishlashi uchun
+    app.add_handler(CommandHandler("exsel", excel_report))
     
     app.add_handler(CallbackQueryHandler(button_callback))
-    app.add_handler(MessageHandler(filters.VIDEO, handle_video))
+    
+    # MUHIM: Ham oddiy video, ham dumaloq video xabarlarni tutish uchun:
+    app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, handle_video))
+    
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
 
-    print("🛡️ Yangilangan bot muvaffaqiyatli ishga tushdi!")
+    print("🛡️ Bot muvaffaqiyatli ishga tushdi!")
     app.run_polling(drop_pending_updates=True, close_loop=False)
     
