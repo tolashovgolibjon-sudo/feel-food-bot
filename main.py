@@ -20,7 +20,7 @@ from telegram.ext import (
 # ---------------------------------------------------------
 # 1. ASOSIY SOZLAMALAR VA ADMIN ID
 # ---------------------------------------------------------
-TOKEN = "8767402192:AAHKaeM8ymcVm31TzehRvqmAbWbNS4vp1oQ"
+TOKEN = "8767402192:AAFBJRCO-HzCdBfp5rAamvClQwWPwT78GR4"
 ADMIN_TELEGRAM_ID = 1631414170  # Bosh admin ID raqami
 
 OFFICE_LAT = 41.003753
