@@ -5,9 +5,9 @@ import datetime
 import pytz
 from io import BytesIO
 import openpyxl
-from flask import Flask
+from flask import Flask, render_template_string
 from threading import Thread
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -30,14 +30,63 @@ MAX_DISTANCE_METERS = 150
 UZB_TZ = pytz.timezone("Asia/Tashkent")
 DB_FILE = "attendance.db"
 
+# Render'dagi tashqi URL manzilingiz (avtomatik aniqlanadi yoki Render bergan nomni yozasiz)
+# Masalan: https://feel-food-bot-2.onrender.com
+WEB_APP_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://feel-food-bot-2.onrender.com")
+
 # ---------------------------------------------------------
-# 2. FLASK SERVER (24/7 UCHUN)
+# 2. FLASK SERVER (Web App va 24/7 uchun)
 # ---------------------------------------------------------
 web_app = Flask('')
 
 @web_app.route('/')
 def home():
-    return "Bot 24/7 himoyalangan rejimda ishlamoqda!"
+    return "Bot 24/7 va Web App rejimida ishlamoqda!"
+
+@web_app.route('/geo')
+def geo_page():
+    # Xodim tugmani bosganda ochiladigan va GPS oladigan mikro-sahifa
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Lokatsiyani aniqlash</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <style>
+            body { font-family: sans-serif; text-align: center; padding-top: 50px; background: #f4f4f9; }
+            h3 { color: #333; }
+            .loader { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 20px auto; }
+            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        </style>
+    </head>
+    <body>
+        <h3>📍 Geolokatsiyangiz aniqlanmoqda...</h3>
+        <p>Iltimos, GPS ruxsatini bering va biroz kuting.</p>
+        <div class="loader"></div>
+        <script>
+            let tg = window.Telegram.WebApp;
+            tg.expand();
+            
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(function(position) {
+                    let lat = position.coords.latitude;
+                    let lon = position.coords.longitude;
+                    // Ma'lumotni botga yuboramiz
+                    tg.sendData(lat + "," + lon);
+                }, function(error) {
+                    alert("GPS xatosi: Lokatsiyaga ruxsat berilmadi yoki GPS o'chiq!");
+                    tg.close();
+                }, { timeout: 10000, enableHighAccuracy: true });
+            } else {
+                alert("Brauzeringiz geolakatsiyani qo'llab-quvvatlamaydi.");
+                tg.close();
+            }
+        </script>
+    </body>
+    </html>
+    """
+    return render_template_string(html_content)
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -49,7 +98,7 @@ def keep_alive():
     t.start()
 
 # ---------------------------------------------------------
-# 3. BAZANI YARATISH (12 yoki 13 soatlik smena tizimi bilan)
+# 3. BAZANI YARATISH
 # ---------------------------------------------------------
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -59,7 +108,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS employees (
             user_id INTEGER PRIMARY KEY,
             full_name TEXT NOT NULL,
-            shift_rate REAL NOT NULL,
+            shift_rate REAL DEFAULT 0,
             shift_hours INTEGER NOT NULL DEFAULT 12,
             is_admin INTEGER DEFAULT 0
         )
@@ -114,7 +163,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# /qosh <id> <FIO> <summa> <soat (12 yoki 13)>
 async def add_employee(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TELEGRAM_ID:
         await update.message.reply_text("❌ Bu buyruqni faqat admin bajarishi mumkin!")
@@ -154,7 +202,6 @@ async def add_employee(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏰ Smena vaqti: {shift_hours} soatlik"
     )
 
-# /stavka <id> <yangi_summa> <soat (12 yoki 13)>
 async def update_stavka(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TELEGRAM_ID:
         await update.message.reply_text("❌ Faqat admin uchun!")
@@ -187,7 +234,6 @@ async def update_stavka(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Xodim (ID: {target_id}) stavkasi {new_rate:,.0f} so'm ({new_hours} soatlik) qilib yangilandi.")
     conn.close()
 
-# /ochir <id>
 async def delete_employee(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TELEGRAM_ID:
         await update.message.reply_text("❌ Faqat admin uchun!")
@@ -215,13 +261,14 @@ async def delete_employee(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
 
 # ---------------------------------------------------------
-# 6. VIDEO VA DUMALOQ VIDEO ORQALI DAVOMATNI CHIQarish
+# 6. VIDEO KELGANDA WEB APP TUGMALARNI CHIQARISH
 # ---------------------------------------------------------
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Web App orqali ishlaydigan tugmalar (guruhning o'zida ochiladi)
     keyboard = [
         [
-            InlineKeyboardButton("🟢 Keldim", callback_data="check_in"),
-            InlineKeyboardButton("🔴 Ketdim", callback_data="check_out")
+            InlineKeyboardButton("🟢 Keldim (GPS)", web_app=WebAppInfo(url=f"{WEB_APP_URL}/geo")),
+            InlineKeyboardButton("🔴 Ketdim (GPS)", web_app=WebAppInfo(url=f"{WEB_APP_URL}/geo"))
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -234,54 +281,29 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    action = query.data
-    user_id = query.from_user.id
-    user_name = query.from_user.full_name
-
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT full_name FROM employees WHERE user_id = ?", (user_id,))
-    emp = cursor.fetchone()
-    conn.close()
-
-    if not emp and user_id != ADMIN_TELEGRAM_ID:
-        await query.message.reply_text(f"❌ {user_name}, siz xodimlar ro'yxatida emassiz! ID: `{user_id}`", parse_mode="Markdown")
-        return
-
-    context.user_data['pending_action'] = action
-
-    location_keyboard = ReplyKeyboardMarkup(
-        [[KeyboardButton("📍 Geolokatsiyani yuborish", request_location=True)]],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-
-    await query.message.reply_text(
-        f"📍 {user_name}, ofisda ekanligingizni tasdiqlash uchun pastdagi **'📍 Geolokatsiyani yuborish'** tugmasini bosing:",
-        reply_markup=location_keyboard
-    )
-
 # ---------------------------------------------------------
-# 7. GPS LOKATSIYANI TEKSHIRISH VA HISOB-KITOB
+# 7. WEB APP ORQALI KELGAN GPS MA'LUMOTINI QABUL QILISH VA TEKSHIRISH
 # ---------------------------------------------------------
-async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_loc = update.message.location
+async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_name = update.effective_user.full_name
-
-    action = context.user_data.get('pending_action')
-    if not action:
-        await update.message.reply_text("⚠️ Avval video ostidagi Keldim/Ketdim tugmalaridan birini bosing.", reply_markup=ReplyKeyboardRemove())
+    
+    try:
+        data_str = update.message.web_app_data.data  # "lat,lon" ko'rinishida keladi
+        lat_str, lon_str = data_str.split(",")
+        user_lat = float(lat_str)
+        user_lon = float(lon_str)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Geolokatsiyani o'qishda xatolik yuz berdi.")
         return
 
-    dist = calculate_distance(user_loc.latitude, user_loc.longitude, OFFICE_LAT, OFFICE_LON)
+    dist = calculate_distance(user_lat, user_lon, OFFICE_LAT, OFFICE_LON)
 
     if dist > MAX_DISTANCE_METERS:
         await update.message.reply_text(
-            f"🚫 **Xavfsizlik ogohlantirishi:** Siz ofis hududida emassiz!\n"
+            f"🚫 **Xavfsizlik ogohlantirishi:** {user_name}, siz ofis hududida emassiz!\n"
             f"Masofa: {int(dist)} metr (Ruxsat: {MAX_DISTANCE_METERS} m).",
-            parse_mode="Markdown",
-            reply_markup=ReplyKeyboardRemove()
+            parse_mode="Markdown"
         )
         return
 
@@ -292,29 +314,37 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
+    # Xodim bazada bormi tekshiramiz, yo'q bo'lsa avtomatik qo'shamiz
     cursor.execute("SELECT shift_rate, shift_hours FROM employees WHERE user_id = ?", (user_id,))
     emp_data = cursor.fetchone()
-    shift_rate = emp_data[0] if emp_data else 0.0
-    shift_hours = emp_data[1] if emp_data else 12
+    
+    if not emp_data:
+        cursor.execute(
+            "INSERT OR IGNORE INTO employees (user_id, full_name, shift_rate, shift_hours, is_admin) VALUES (?, ?, 0, 12, 0)",
+            (user_id, user_name)
+        )
+        conn.commit()
+        shift_rate = 0.0
+        shift_hours = 12
+    else:
+        shift_rate = emp_data[0]
+        shift_hours = emp_data[1]
 
-    if action == "check_in":
-        cursor.execute("SELECT id FROM attendance WHERE user_id = ? AND date = ?", (user_id, today_str))
-        if cursor.fetchone():
-            await update.message.reply_text(f"⚠️ {user_name}, siz bugun allaqachon 'Keldim' deb belgilagansiz!", reply_markup=ReplyKeyboardRemove())
-        else:
-            cursor.execute("INSERT INTO attendance (user_id, date, check_in) VALUES (?, ?, ?)", (user_id, today_str, time_str))
-            conn.commit()
-            await update.message.reply_text(f"✅ {user_name}, ishga kelgan vaqtingiz qayd etildi: {time_str} 🟢", reply_markup=ReplyKeyboardRemove())
+    # Qaysi tugma bosilganligini aniqlash uchun oddiy mantiq:
+    # Agar bugun kelmagan bo'lsa - Keldim, kelgan bo'lsa - Ketdim deb yozamiz
+    cursor.execute("SELECT id, check_in, check_out FROM attendance WHERE user_id = ? AND date = ?", (user_id, today_str))
+    row = cursor.fetchone()
 
-    elif action == "check_out":
-        cursor.execute("SELECT id, check_in FROM attendance WHERE user_id = ? AND date = ?", (user_id, today_str))
-        row = cursor.fetchone()
-        if not row:
-            await update.message.reply_text(f"⚠️ {user_name}, siz bugun hali 'Keldim' tugmasini bosmagansiz!", reply_markup=ReplyKeyboardRemove())
-        else:
-            att_id, check_in_str = row
+    if not row:
+        # Hali kelmagan -> "Keldim" deb yozamiz
+        cursor.execute("INSERT INTO attendance (user_id, date, check_in) VALUES (?, ?, ?)", (user_id, today_str, time_str))
+        conn.commit()
+        await update.message.reply_text(f"✅ {user_name}, ishga kelgan vaqtingiz muvaffaqiyatli qayd etildi: {time_str} 🟢 (Masofa: {int(dist)}m)")
+    else:
+        att_id, check_in_str, check_out_str = row
+        if not check_out_str:
+            # Kelgan, lekin ketmagan -> "Ketdim" deb yozamiz
             check_in_dt = UZB_TZ.localize(datetime.datetime.strptime(f"{today_str} {check_in_str}", "%Y-%m-%d %H:%M:%S"))
-            
             duration = (now_uzb - check_in_dt).total_seconds() / 3600.0
             earned = shift_rate
 
@@ -323,18 +353,25 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 (time_str, round(duration, 2), earned, att_id)
             )
             conn.commit()
-            await update.message.reply_text(
-                f"🔴 {user_name}, ishdan ketgan vaqtingiz qayd etildi: {time_str}\n"
-                f"⏱ Smena vaqti: {shift_hours} soatlik\n"
-                f"💰 Hisoblangan smena haqi: {earned:,.0f} so'm",
-                reply_markup=ReplyKeyboardRemove()
-            )
+            
+            if shift_rate == 0:
+                await update.message.reply_text(
+                    f"🔴 {user_name}, ishdan ketgan vaqtingiz qayd etildi: {time_str}\n"
+                    f"⚠️ Diqqat: Sizga hali admin tomonidan stavka belgilanmagan!"
+                )
+            else:
+                await update.message.reply_text(
+                    f"🔴 {user_name}, ishdan ketgan vaqtingiz qayd etildi: {time_str}\n"
+                    f"⏱ Smena vaqti: {shift_hours} soatlik\n"
+                    f"💰 Hisoblangan smena haqi: {earned:,.0f} so'm"
+                )
+        else:
+            await update.message.reply_text(f"⚠️ {user_name}, siz bugungi smenani allaqachon yakunlagansiz!")
 
     conn.close()
-    context.user_data['pending_action'] = None
 
 # ---------------------------------------------------------
-# 8. EXCEL HISOBOTLAR (/excel kun va /excel maosh)
+# 8. EXCEL HISOBOTLAR
 # ---------------------------------------------------------
 async def excel_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TELEGRAM_ID:
@@ -433,12 +470,11 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("exsel", excel_report))
     
     app.add_handler(CallbackQueryHandler(button_callback))
-    
-    # MUHIM: Ham oddiy video, ham dumaloq video xabarlarni tutish uchun:
     app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, handle_video))
     
-    app.add_handler(MessageHandler(filters.LOCATION, handle_location))
+    # Web App orqali kelgan ma'lumotni ushlash uchun:
+    app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data))
 
-    print("🛡️ Bot muvaffaqiyatli ishga tushdi!")
+    print("🛡️ Bot Web App rejimida muvaffaqiyatli ishga tushdi!")
     app.run_polling(drop_pending_updates=True, close_loop=False)
     
