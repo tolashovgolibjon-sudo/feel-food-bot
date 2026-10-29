@@ -192,7 +192,35 @@ async def delete_employee(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
 
 # ---------------------------------------------------------
-# 5. VIDEO KELGANDA TUGMALARNI CHIQARISH
+# 5. XODIMLAR RO'YXATINI KO'RSATISH (/hodim)
+# ---------------------------------------------------------
+async def list_employees(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_TELEGRAM_ID:
+        await update.message.reply_text("❌ Bu buyruq faqat admin uchun!")
+        return
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id, full_name, shift_rate, shift_hours, is_admin FROM employees")
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        await update.message.reply_text("📭 Hozircha bazada xodimlar yo'q.")
+        return
+
+    text = "📋 **Ro'yxatdagi xodimlar:**\n\n"
+    for r in rows:
+        user_id, name, rate, hours, is_admin = r
+        role = "👑 Admin" % () if is_admin else "👤 Xodim"
+        text += f"• **{name}** ({role})\n"
+        text += f"  🆔 ID: `{user_id}`\n"
+        text += f"  💰 Stavka: {rate:,.0f} so'm ({hours} soat)\n\n"
+
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+# ---------------------------------------------------------
+# 6. VIDEO KELGANDA TUGMALARNI CHIQARISH
 # ---------------------------------------------------------
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -208,7 +236,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ---------------------------------------------------------
-# 6. TUGMA BOSILgANDA DAVOMATNI BELGILASH (GEOLOKATSIYASIZ)
+# 7. TUGMA BOSILgANDA DAVOMATni BELGILASH
 # ---------------------------------------------------------
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -221,7 +249,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
-    # Xodim bazada bormi tekshiramiz, yo'q bo'lsa avtomatik qo'shamiz
     cursor.execute("SELECT shift_rate, shift_hours FROM employees WHERE user_id = ?", (user_id,))
     emp_data = cursor.fetchone()
     
@@ -285,7 +312,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
 
 # ---------------------------------------------------------
-# 7. EXCEL HISOBOTLAR
+# 8. EXCEL HISOBOTLAR
 # ---------------------------------------------------------
 async def excel_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TELEGRAM_ID:
@@ -365,7 +392,7 @@ async def excel_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Excel hisobot shaxsiy chatingizga yuborildi!")
 
 # ---------------------------------------------------------
-# 8. ISHGA TUSHIRISH
+# 9. ISHGA TUSHIRISH
 # ---------------------------------------------------------
 async def post_init(application: Application):
     await application.bot.delete_webhook(drop_pending_updates=True)
@@ -380,12 +407,13 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("qosh", add_employee))
     app.add_handler(CommandHandler("stavka", update_stavka))
     app.add_handler(CommandHandler("ochir", delete_employee))
+    app.add_handler(CommandHandler("hodim", list_employees))  # 👈 Yangi qo'shilgan buyruq
     app.add_handler(CommandHandler("excel", excel_report))
     app.add_handler(CommandHandler("exsel", excel_report))
     
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, handle_video))
 
-    print("🛡️ Bot geolakatsiyasiz, oddiy rejimda muvaffaqiyatli ishga tushdi!")
+    print("🛡️ Bot /hodim buyrug'i bilan muvaffaqiyatli ishga tushdi!")
     app.run_polling(drop_pending_updates=True, close_loop=False)
     
